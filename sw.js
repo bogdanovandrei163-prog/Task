@@ -1,12 +1,12 @@
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(clients.claim()));
 
-self.addEventListener('push', (event) => {
-  const data = event.data ? event.data.json() : {};
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
   event.waitUntil(
-    self.registration.showNotification(data.title || '🔔 Напоминание', {
-      body: data.body || '',
-      icon: 'icon-192.png'
+    clients.matchAll({ type: 'window' }).then(list => {
+      for (const c of list) { if ('focus' in c) return c.focus(); }
+      if (clients.openWindow) return clients.openWindow('./');
     })
   );
 });
