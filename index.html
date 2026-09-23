@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Заметки и События</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f0f2f5;
+    color: #1a1a1a;
+    padding: 20px;
+    max-width: 700px;
+    margin: 0 auto;
+  }
+  h1 { margin-bottom: 20px; color: #2c3e50; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .tab {
+    padding: 10px 20px; border: none; border-radius: 8px;
+    background: #fff; cursor: pointer; font-size: 15px;
+    transition: 0.2s;
+  }
+  .tab.active { background: #3498db; color: #fff; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .form { background: #fff; padding: 16px; border-radius: 12px; margin-bottom: 20px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  input, textarea, button {
+    width: 100%; padding: 10px 12px; margin-bottom: 10px;
+    border: 1px solid #ddd; border-radius: 8px; font-size: 15px;
+    font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 70px; }
+  .btn {
+    background: #3498db; color: #fff; border: none; cursor: pointer;
+    font-weight: 600; transition: 0.2s;
+  }
+  .btn:hover { background: #2980b9; }
+  .btn-danger { background: #e74c3c; padding: 6px 10px; width: auto; margin: 0; font-size: 13px; }
+  .btn-danger:hover { background: #c0392b; }
+  .item {
+    background: #fff; padding: 14px 16px; border-radius: 10px;
+    margin-bottom: 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+  }
+  .item-content { flex: 1; }
+  .item-title { font-weight: 600; margin-bottom: 4px; }
+  .item-text { color: #555; font-size: 14px; white-space: pre-wrap; }
+  .item-date { color: #888; font-size: 13px; margin-top: 6px; }
+  .empty { text-align: center; color: #999; padding: 20px; font-style: italic; }
+  .notif-warn {
+    background: #fff3cd; border: 1px solid #ffeeba; color: #856404;
+    padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 14px;
+  }
+</style>
+</head>
+<body>
+
+<h1>📝 Заметки и События</h1>
+
+<div id="notifWarn" class="notif-warn" style="display:none">
+  ⚠️ Уведомления не разрешены. <button id="allowNotif" style="width:auto;padding:4px 10px;margin:0;display:inline">Разрешить</button>
+</div>
+
+<div class="tabs">
+  <button class="tab active" data-tab="notes">Заметки</button>
+  <button class="tab" data-tab="events">События</button>
+</div>
+
+<!-- Заметки -->
+<div id="notes" class="panel active">
+  <div class="form">
+    <input id="noteTitle" placeholder="Заголовок заметки">
+    <textarea id="noteText" placeholder="Текст заметки"></textarea>
+    <button class="btn" onclick="addNote()">Добавить заметку</button>
+  </div>
+  <div id="notesList"></div>
+</div>
+
+<!-- События -->
+<div id="events" class="panel">
+  <div class="form">
+    <input id="eventTitle" placeholder="Название события">
+    <textarea id="eventDesc" placeholder="Описание (необязательно)"></textarea>
+    <input id="eventDate" type="datetime-local">
+    <button class="btn" onclick="addEvent()">Создать событие</button>
+  </div>
+  <div id="eventsList"></div>
+</div>
+
+<script>
+// ===== Работа с уведомлениями =====
+function checkNotifPermission() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') {
+    document.getElementById('notifWarn').style.display = 'block';
+  } else if (Notification.permission === 'denied') {
+    document.getElementById('notifWarn').style.display = 'block';
+    document.getElementById('notifWarn').innerHTML = '❌ Уведомления запрещены в браузере. Разреши их в настройках сайта.';
+  } else {
+    document.getElementById('notifWarn').style.display = 'none';
+  }
+}
+document.getElementById('allowNotif').onclick = async () => {
+  await Notification.requestPermission();
+  checkNotifPermission();
+};
+checkNotifPermission();
+
+function sendNotification(title, body) {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'granted') {
+    new Notification(title, { body, icon: 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔔</text></svg>' });
+  }
+}
+
+// ===== Хранилище =====
+const LS_NOTES = 'app_notes';
+const LS_EVENTS = 'app_events';
+const LS_FIRED = 'app_fired_events';
+
+function load(key) { try { return JSON.parse(localStorage.getItem(key)) || []; } catch { return []; } }
+function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
+
+let notes = load(LS_NOTES);
+let events = load(LS_EVENTS);
+let fired = load(LS_FIRED); // id событий, по которым уже отправлено уведомление
+
+// ===== Табы =====
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.tab).classList.add('active');
+  };
+});
+
+// ===== Заметки =====
+function addNote() {
+  const title = document.getElementById('noteTitle').value.trim();
+  const text = document.getElementById('noteText').value.trim();
+  if (!title && !text) return;
+  notes.unshift({ id: Date.now(), title, text, created: new Date().toISOString() });
+  save(LS_NOTES, notes);
+  document.getElementById('noteTitle').value = '';
+  document.getElementById('noteText').value = '';
+  renderNotes();
+}
+
+function deleteNote(id) {
+  notes = notes.filter(n => n.id !== id);
+  save(LS_NOTES, notes);
+  renderNotes();
+}
+
+function renderNotes() {
+  const list = document.getElementById('notesList');
+  if (!notes.length) { list.innerHTML = '<div class="empty">Пока нет заметок</div>'; return; }
+  list.innerHTML = notes.map(n => `
+    <div class="item">
+      <div class="item-content">
+        <div class="item-title">${escapeHtml(n.title) || '(без заголовка)'}</div>
+        ${n.text ? `<div class="item-text">${escapeHtml(n.text)}</div>` : ''}
+        <div class="item-date">${new Date(n.created).toLocaleString('ru-RU')}</div>
+      </div>
+      <button class="btn btn-danger" onclick="deleteNote(${n.id})">Удалить</button>
+    </div>
+  `).join('');
+}
+
+// ===== События =====
+function addEvent() {
+  const title = document.getElementById('eventTitle').value.trim();
+  const desc = document.getElementById('eventDesc').value.trim();
+  const dateStr = document.getElementById('eventDate').value;
+  if (!title || !dateStr) { alert('Укажи название и дату события'); return; }
+  const date = new Date(dateStr).getTime();
+  if (date <= Date.now()) { alert('Дата события должна быть в будущем'); return; }
+  events.push({ id: Date.now(), title, desc, date });
+  events.sort((a, b) => a.date - b.date);
+  save(LS_EVENTS, events);
+  document.getElementById('eventTitle').value = '';
+  document.getElementById('eventDesc').value = '';
+  document.getElementById('eventDate').value = '';
+  renderEvents();
+}
+
+function deleteEvent(id) {
+  events = events.filter(e => e.id !== id);
+  fired = fired.filter(f => f !== id);
+  save(LS_EVENTS, events);
+  save(LS_FIRED, fired);
+  renderEvents();
+}
+
+function renderEvents() {
+  const list = document.getElementById('eventsList');
+  if (!events.length) { list.innerHTML = '<div class="empty">Пока нет событий</div>'; return; }
+  list.innerHTML = events.map(e => {
+    const d = new Date(e.date);
+    const isPast = e.date < Date.now();
+    return `
+      <div class="item">
+        <div class="item-content">
+          <div class="item-title">${escapeHtml(e.title)}</div>
+          ${e.desc ? `<div class="item-text">${escapeHtml(e.desc)}</div>` : ''}
+          <div class="item-date">🕐 ${d.toLocaleString('ru-RU')} ${isPast ? '(прошло)' : ''}</div>
+        </div>
+        <button class="btn btn-danger" onclick="deleteEvent(${e.id})">Удалить</button>
+      </div>
+    `;
+  }).join('');
+}
+
+// ===== Проверка событий (раз в 15 сек) =====
+function checkEvents() {
+  const now = Date.now();
+  let changed = false;
+  events.forEach(ev => {
+    if (ev.date <= now && !fired.includes(ev.id)) {
+      sendNotification('🔔 ' + ev.title, ev.desc || 'Событие наступило');
+      fired.push(ev.id);
+      changed = true;
+    }
+  });
+  if (changed) save(LS_FIRED, fired);
+}
+setInterval(checkEvents, 15000);
+checkEvents();
+
+// ===== Утилиты =====
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  })[c]);
+}
+
+// ===== Инициализация =====
+renderNotes();
+renderEvents();
+</script>
+</body>
+</html>
